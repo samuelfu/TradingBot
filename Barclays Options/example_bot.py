@@ -15,10 +15,12 @@ def ack_register_method(msg, order):
 			continue
 		SECURITIES[security] = security_dict[security]['starting_price']
 
+
 # Updates latest price
 def market_update_method(msg, order):
 	global SECURITIES
 	SECURITIES[msg['market_state']['ticker']] = msg['market_state']['last_price']
+
 
 # Buys or sells in a random quantity every time it gets an update
 # You do not need to buy/sell here
@@ -28,10 +30,10 @@ def trader_update_method(msg, order):
 	positions = msg['trader_state']['positions']
 	for security in positions.keys():
 		if random.random() < 0.5:
-			quant = 10*random.randint(1, 10)
+			quant = random.randint(1, 10)
 			order.addBuy(security, quantity=quant,price=SECURITIES[security])
 		else:
-			quant = 10*random.randint(1, 10)
+			quant = random.randint(1, 10)
 			order.addSell(security, quantity=quant,price=SECURITIES[security])
 
 ###############################################

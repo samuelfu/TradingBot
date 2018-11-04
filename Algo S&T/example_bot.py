@@ -12,17 +12,19 @@ position_dark = 0
 time = 0
 topBid = 0
 topAsk = 0
+c = 0.00004
 #etc etc
 
 def register(msg, TradersOrder):
     #Set case information
     pass
 
-def update_market(TradersOrder):
+def update_market(msg, TradersOrder):
     #Update market information
+    #print(msg['market_state']['last_price'])
     pass
 
-def update_trader(TradersOrder):
+def update_trader(msg, TradersOrder):
     #Update positions
     pass
 
