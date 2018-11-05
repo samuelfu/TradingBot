@@ -21,7 +21,6 @@ def register(msg, TradersOrder):
 
 def update_market(msg, TradersOrder):
     #Update market information
-    #print(msg['market_state']['last_price'])
     pass
 
 def update_trader(msg, TradersOrder):

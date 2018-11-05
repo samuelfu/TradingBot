@@ -1,3 +1,8 @@
+'''
+1. Exploit inconsistencies in implied volatility across different strike prices
+2. Market make when spreads are large, without becoming overly exposed to risk
+3. Hedge positions to reduce risk
+'''
 import tradersbot as tt
 import random
 
@@ -5,20 +10,23 @@ t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
 
 # Keeps track of prices
 SECURITIES = {}
+dicts = []
 
 # Initializes the prices
 def ack_register_method(msg, order):
 	global SECURITIES
+	global dicts
 	security_dict = msg['case_meta']['securities']
 	for security in security_dict.keys():
 		if not(security_dict[security]['tradeable']):
 			continue
 		SECURITIES[security] = security_dict[security]['starting_price']
-
+	dicts.append(SECURITIES)
 
 # Updates latest price
 def market_update_method(msg, order):
 	global SECURITIES
+	global dicts
 	SECURITIES[msg['market_state']['ticker']] = msg['market_state']['last_price']
 
 
@@ -26,7 +34,7 @@ def market_update_method(msg, order):
 # You do not need to buy/sell here
 def trader_update_method(msg, order):
 	global SECURITIES
-
+	global dicts
 	positions = msg['trader_state']['positions']
 	for security in positions.keys():
 		if random.random() < 0.5:
@@ -35,6 +43,8 @@ def trader_update_method(msg, order):
 		else:
 			quant = random.randint(1, 10)
 			order.addSell(security, quantity=quant,price=SECURITIES[security])
+
+
 
 ###############################################
 #### You can add more of these if you want ####
