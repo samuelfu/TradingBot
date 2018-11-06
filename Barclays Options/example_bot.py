@@ -5,6 +5,7 @@
 '''
 import tradersbot as tt
 import numpy as np
+import datetime
 from scipy import stats
 t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
 
@@ -12,6 +13,8 @@ t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
 SECURITIES = {}
 # Keep track of time
 startTime = ""
+# Keep track of IV
+IV_dict = {}
 
 # Initializes the prices
 def ack_register_method(msg, order):
@@ -22,7 +25,8 @@ def ack_register_method(msg, order):
 		if not(security_dict[security]['tradeable']):
 			continue
 		SECURITIES[security] = security_dict[security]['starting_price']
-
+	if startTime == "":
+		startTime = datetime.datetime.now()
 # Updates latest price
 def market_update_method(msg, order):
 	global SECURITIES
@@ -32,27 +36,37 @@ def market_update_method(msg, order):
 # You do not need to buy/sell here
 def trader_update_method(msg, order):
 	global SECURITIES
+	global startTime
+	global IV_dict
 	positions = msg['trader_state']['positions']
 	for security in positions.keys():
 		if security == 'T100C':
-			current_underlying_price = positions['TMXFUT']
-			current_option_price = positions[security]
-			IV = implied_vol('c', current_option_price, current_underlying_price, 100, 0, 1/12)
-			predicted_price = bsm_price('c', IV, current_underlying_price, 100, 0, 1/12)
-			# 1/12 will be updated to be a ticking time
+			if security not in IV_dict:
+				IV_dict[security] = []
+				IV_dict['time'] = []
+			time_difference = datetime.datetime.now() - startTime
+			time_until_expiration = (7.5*60 - time_difference.total_seconds())/3600/24/365 # total of 7.5 minutes per round
+			current_underlying_price = SECURITIES['TMXFUT']
+			current_option_price = SECURITIES[security]
+			IV = implied_vol('c', current_option_price, current_underlying_price, int(security[1:-1]), 0, time_until_expiration)
+			IV_dict[security].append(IV)
+			IV_dict['time'].append(time_until_expiration)
+			predicted_IV = predict_IV(IV_dict['time'],IV_dict[security])
+
+			predicted_price = bsm_price('c', predicted_IV, current_underlying_price, int(security[1:-1]), 0, time_until_expiration)
 			if predicted_price > current_option_price:
-				order.addBuy(security, quantity=50,price=SECURITIES[security])
+				order.addBuy(security, quantity=50, price=SECURITIES[security])
 			else:
 				order.addSell(security, quantity=50, price=SECURITIES[security])
 
-			''' Original code
-			if random.random() < 0.5:
-				quant = 10
-				order.addBuy(security, quantity=quant,price=SECURITIES[security])
-			else:
-				quant = 10
-				order.addSell(security, quantity=quant,price=SECURITIES[security])
-			'''
+# Predicts IV 3 seconds into the future
+# Z returns [A, B, C] of Ax^2 + Bx + C
+def predict_IV(time_list, IV_List):
+	x = np.array(time_list)
+	y = np.array(IV_List)
+	z = np.polyfit(x,y,2)
+	future_time = time_list[-1] - 3.0/3600/24/365
+	return z[0]*future_time*future_time + z[1]*future_time + z[2]
 
 # Black-Scholes formula.
 # Current price of the underlying (the spot price) S
