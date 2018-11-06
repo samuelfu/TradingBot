@@ -10,7 +10,8 @@ from scipy import stats
 import warnings
 
 warnings.simplefilter('ignore', np.RankWarning)
-t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
+# t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
+t = tt.TradersBot(host=sys.argv[1], id=sys.argv[2], password=sys.argv[3])
 
 # Keeps track of prices
 SECURITIES = {}
