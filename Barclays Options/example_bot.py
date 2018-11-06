@@ -7,6 +7,9 @@ import tradersbot as tt
 import numpy as np
 import datetime
 from scipy import stats
+import warnings
+
+warnings.simplefilter('ignore', np.RankWarning)
 t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
 
 # Keeps track of prices
