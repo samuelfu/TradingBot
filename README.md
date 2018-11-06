@@ -28,7 +28,7 @@ Start the trading server using something like `./mangocore-osx-amd64.x -case /pa
 Start each bot as a standard python3 file.
 
 ## Barclays Options
-####Case Information:
+### Case Information:
 
 The trade-able instruments are options and TMXFUT futures, where the futures are solely for hedging. Both are cash-settled.
 
@@ -47,7 +47,7 @@ Five example tickers are listed below; other tickers follow the same naming conv
 
 The ticker for futures on the index is “TMXFUT”
 
-#### File information
+### File information
 'example_bot.py'
 
 Calculates the implied volatility of T100C whenever market updates
