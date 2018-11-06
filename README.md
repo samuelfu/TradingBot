@@ -26,3 +26,14 @@ Usage of mangocore:
 Start the trading server using something like `./mangocore-osx-amd64.x -case /path/to/casefile`.
 
 Start each bot as a standard python3 file.
+
+## Barclays Options
+Calculates the implied volatility of T100C whenever market updates
+
+Uses the historical implied volatility to predict using polynomial regression future volatility (3 seconds out)
+
+Calculate future price of T100C using future implied volatility
+
+If future price > current price, purchase call option
+
+If future price < current price, sell call option
