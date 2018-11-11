@@ -1,6 +1,7 @@
 from tradersbot import TradersBot
 import sys
 from datetime import datetime, timedelta
+import random
 import numpy as np
 import pandas as pd
 
@@ -25,6 +26,7 @@ CANCEL_TRADES = True
 
 cash = 100000
 dark_advantage = 0.1 # ratio for DARK pricing
+dark_trading_history = [] # [(advantage, percentage)]
 first_time = None
 market_position_lit = 0
 market_position_dark = 0
@@ -110,6 +112,7 @@ def process_order(pending_order, order):
 
 def handle_pre_sale(pending_order, order):
     reach_target_position(pending_order['target'], order)
+    pending_order['dark_at_news'] = position_dark
     if DARK_TRADING:
         time_remaining = pending_order['sale_time'] - get_time()
         expected_position_lit = -position_dark + pending_order['size']
@@ -126,12 +129,15 @@ def handle_pre_sale(pending_order, order):
             attempted_price = advantage_price
             result = make_trade(pending_order['quantity'], order, ticker=DARK_TICKER, price=attempted_price)
             # [quantity, price, [list of ids]]
-            pending_order['orders'].append(result + [[]])
+            if result[0] > 0:
+                pending_order['orders'].append(result + [[]])
+                pending_order['dark_advantage'] = dark_advantage
 
 
 def check_sold(pending_order):
     if get_time() > pending_order['sale_time']:
         pending_order['p0_at_sale'] = p0
+        pending_order['dark_at_eval'] = position_dark
         pending_order['sold'] = True
 
 def handle_post_sale(pending_order, order):
@@ -143,18 +149,63 @@ def handle_post_sale(pending_order, order):
     if abs(change_in_p0 - full) <= margin:
         customers[name]['full'] += 1
         pending_order['p0_at_eval'] = p0
+        pending_order['dark_at_eval'] = position_dark
+        adjust_dark_advantage(pending_order)
     elif abs(change_in_p0 - half) <= margin:
         customers[name]['half'] += 1
         pending_order['p0_at_eval'] = p0
+        pending_order['dark_at_eval'] = position_dark
+        adjust_dark_advantage(pending_order)
     elif abs(change_in_p0) <= margin:
         if get_time() > pending_order['eval_time']:
             customers[name]['random'] += 1
             pending_order['p0_at_eval'] = p0
+            pending_order['dark_at_eval'] = position_dark
+            adjust_dark_advantage(pending_order)
     elif get_time() > pending_order['eval_time']:
         pending_order['p0_at_eval'] = p0
+        pending_order['dark_at_eval'] = position_dark
+        adjust_dark_advantage(pending_order)
     else:
         reach_target_position(pending_order['target'], order)
-    
+
+def adjust_dark_advantage(pending_order):
+    global dark_advantage
+    percentage = pending_order['dark_at_eval'] - pending_order['dark_at_news']
+    percentage /= pending_order['quantity']
+    percentage = abs(percentage)
+    dark_trading_history.append((dark_advantage, percentage))
+    step = 0.1 # 10% step
+    step *= dark_advantage
+    margin = step / 2
+    increase = dark_advantage + step
+    decrease = dark_advantage - step
+    up = [pair[1] for pair in dark_trading_history if abs(pair[0] - increase) <= margin]
+    stay = [pair[1] for pair in dark_trading_history if abs(pair[0] - dark_advantage) <= margin]
+    down = [pair[1] for pair in dark_trading_history if abs(pair[0] - dark_advantage) <= margin]
+    # If we're not selling everything, move 
+    if len(up) == 0:
+        if random.random() < 0.25:
+            dark_advantage *= 1.1
+            return
+        else:
+            up = [0]
+    if len(down) == 0:
+        if random.random() < 0.25:
+            dark_advantage *= 0.9
+            return
+        else:
+            down = [0]
+    up = sum(up) / len(up)
+    stay = sum(stay) / len(stay)
+    down = sum(down) / len(down)
+    up *= 1.1
+    down *- 0.9
+    best = max(up, stay, down)
+    if up == best:
+        dark_advantage *= 1.1
+    elif down == best:
+        dark_advantage *= 0.9
 
 def check_done(pending_order):
     pending_order['done'] = pending_order['p0_at_eval'] is not None
@@ -217,7 +268,6 @@ def close_out(order):
 def onAckRegister(msg, order):
     global POSITION_LIMIT, CURRENCY, CASE_LENGTH, INITIAL_CASH
     global time_offset, p0
-    print(msg)
     if 'TRDRS' in msg['case_meta']['underlyings']:
         POSITION_LIMIT = msg['case_meta']['underlyings']['TRDRS']['limit']
     else:
@@ -350,7 +400,10 @@ def onNews(msg, order):
                     'p0_at_eval': None,
                     'orders': [],
                     'sold': False,
-                    'done': False}
+                    'done': False,
+                    'dark_at_news': None,
+                    'dark_at_eval': None,
+                    'dark_advantage': None}
         pending_orders.append(new_order)
     except:
         print('Unable to parse headline: Unknown error')
@@ -359,7 +412,7 @@ DEBUG = True
 algo_bot = None
 if len(sys.argv) >= 4:
     algo_bot = TradersBot(host=sys.argv[1], id=sys.argv[2], password=sys.argv[3])
-    DEBUG = False
+    # DEBUG = False
     CANCEL_TRADES = False
 else:
     algo_bot = TradersBot('127.0.0.1', 'trader0', 'trader0')
