@@ -11,11 +11,13 @@ import tradersbot as tt
 import numpy as np
 import datetime
 from scipy import stats
+import sys
 import warnings
 
+
 warnings.simplefilter('ignore', np.RankWarning)
-t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
-#t = tt.TradersBot(host=sys.argv[1], id=sys.argv[2], password=sys.argv[3])
+#t = tt.TradersBot(host='127.0.0.1', id='trader0', password='trader0')
+t = tt.TradersBot(host=sys.argv[1], id=sys.argv[2], password=sys.argv[3])
 
 # Keeps track of prices
 SECURITIES = {}
@@ -70,22 +72,44 @@ def trader_update_method(msg, order):
             else:
                 predicted_price = bsm_price('p', predicted_IV, current_underlying_price, int(security[1:-1]), 0, time_until_expiration)
             if predicted_price > current_option_price:
-                order.addBuy(security, quantity=1, price=SECURITIES[security])
+                order.addBuy(security, quantity=10, price=SECURITIES[security])
                 orderLimit += 1
             else:
-                order.addSell(security, quantity=1, price=SECURITIES[security])
+                order.addSell(security, quantity=10, price=SECURITIES[security])
                 orderLimit += 1
         # 80 goes over the limit some how
         if orderLimit > 37:
             break
+    #print(str(totalValueInPortfolio(msg)+msg['trader_state']['cash']['USD']-1000000)+'\t'+str(totalPositions(msg)))
+
+# Assumes that msg contains every single option's update
+def totalValueInPortfolio(msg):
+    global SECURITIES
+    global IV_dict
+    totalValue = 0
+    positions = msg['trader_state']['positions']
+
+    for key, value in positions.items():
+        totalValue += value * SECURITIES[key]
+
+    return totalValue
+
+def totalPositions(msg):
+    global SECURITIES
+    global IV_dict
+    totalPosition = 0
+    positions = msg['trader_state']['positions']
+    for key, value in positions.items():
+        totalPosition += abs(value)
+    return totalPosition
 
 # Predicts IV 3 seconds into the future
 # Z returns [A, B, C] of Ax^2 + Bx + C
 def predict_IV(time_list, IV_List):
     x = np.array(time_list)
     y = np.array(IV_List)
-    z = np.polyfit(x,y,2)
-    future_time = time_list[-1] - 3.0/3600/24/365
+    z = np.polyfit(x, y, 2)
+    future_time = time_list[-1] - 2.0/3600/24/365
     return z[0]*future_time*future_time + z[1]*future_time + z[2]
 
 # Black-Scholes formula.

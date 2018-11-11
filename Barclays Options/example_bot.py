@@ -11,7 +11,7 @@ def ack_register_method(msg, order):
 	global SECURITIES
 	security_dict = msg['case_meta']['securities']
 	for security in security_dict.keys():
-		if not(security_dict[security]['tradeable']): 
+		if not(security_dict[security]['tradeable']):
 			continue
 		SECURITIES[security] = security_dict[security]['starting_price']
 
