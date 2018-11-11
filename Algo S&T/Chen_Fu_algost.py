@@ -5,13 +5,22 @@ import numpy as np
 import pandas as pd
 
 #Initialize variables: positions, expectations, future customer orders, etc
-POSITION_LIMIT = 5000
+C = 0.00004 # 1/25000
 CASE_LENGTH = 450
+CLOSE_OUT_MARGIN = 25 # when do we stop trading and balance our position
 CURRENCY = 'USD'
+DARK_TICKER = 'TRDRS.DARK'
+INITIAL_CASH = 100000
 ORDER_DELAY = 8
+ORDER_LIMIT = 1000
 ORDER_WAIT = 15 # how long to wait before evaluating the effect
-C = 0.00004
+LIT_TICKER = 'TRDRS.LIT'
 MESSAGE_LIMIT = 25
+POSITION_LIMIT = 5000
+
+# DARK_TRADING = True
+DARK_TRADING = False
+POSITION_BALANCING = True
 
 p0 = 200
 cash = 100000
@@ -21,154 +30,204 @@ market_position_dark = 0
 position_lit = 0
 position_dark = 0
 first_time = None
-time = 0
 time_offset = 0 # for when it starts late
-topBid = 0
-topAsk = 0
+
 # TODO: use a more sophisticated probability model
 # customers['Bob'] = {'full':0, 'half':5, 'random':1}
 # the values are the number of times each possibility occurs
 customers = {}
+# maps customer name to a list for the probability of being each person
+# 'Alice': ['random':p_r, 'half':p_h, 'full':p_f]
+customer_identities = {}
 pending_orders = []
 # contains (ticker, trade_id, cancelled) = ('TRDRS.DARK', 0, False)
-pending_trades = set()
+cancelled_trades = set()
 recent_messages = []
 
-def readyToSend():
-    global MESSAGE_LIMIT, recent_messages, time
-    updateTime()
-    time_limit = time - 1
+def compute_valuation():
+    net_position = position_lit + position_dark
+    asset_value = net_position * price
+    total_value = asset_value + cash
+    return total_value
+
+def update_probabilities():
+    # For simplicity, we'll assume there are only 3 customers.
+    # TODO: Fix this for any number of customers.
+    names = list(customers.keys())
+    probabilities = {}
+    for key in customers:
+        record = customers[key]
+        total = record['random'] + record['half'] + record['full']
+        if total == 0:
+            probabilities[key] = [1/3, 1/3, 1/3]
+        else:
+            probabilities[key] = [record['random'] / total, record['half'] / total, record['full'] / total]
+    p = probabilities; a = names[0]; b = names[1]; c = names[2]; r = 0; h = 1; f = 2
+    customer_identities[a]['random'] = p[a][r] * (p[b][h]*p[c][f] + p[b][f]*p[c][h])
+    customer_identities[a]['half'] = p[a][h] * (p[b][r]*p[c][f] + p[b][f]*p[c][r])
+    customer_identities[a]['full'] = p[a][f] * (p[b][r]*p[c][h] + p[b][h]*p[c][r])
+    customer_identities[b]['random'] = p[b][r] * (p[a][h]*p[c][f] + p[a][f]*p[c][h])
+    customer_identities[b]['half'] = p[b][h] * (p[a][r]*p[c][f] + p[a][f]*p[c][r])
+    customer_identities[b]['full'] = p[b][f] * (p[a][r]*p[c][h] + p[a][h]*p[c][r])
+    customer_identities[c]['random'] = p[c][r] * (p[b][h]*p[a][f] + p[b][f]*p[a][h])
+    customer_identities[c]['half'] = p[c][h] * (p[b][r]*p[a][f] + p[b][f]*p[a][r])
+    customer_identities[c]['full'] = p[c][f] * (p[b][r]*p[a][h] + p[b][h]*p[a][r])
+    
+
+def ready_to_send():
+    global recent_messages
+    time_limit = get_time() - 1
     for i in range(len(recent_messages)):
         if recent_messages[i] >= time_limit:
             recent_messages = recent_messages[i:]
+            break
     if len(recent_messages) < MESSAGE_LIMIT:
-        recent_messages.append(time)
+        recent_messages.append(get_time())
         return True
     return False
 
-def updateTime():
-    global first_time, time, time_offset
-    if first_time is None:
-        first_time = datetime.now()
+def get_time():
     delta = datetime.now() - first_time
-    time = delta.total_seconds() + time_offset
+    return delta.total_seconds() + time_offset
 
-def processOrders(order):
-    global pending_orders
+def process_orders(order):
     for pending in pending_orders:
-        processOrder(pending, order)
+        process_order(pending, order)
 
-def processOrder(pending_order, order):
-    global time, p0, customers
-    if pending_order is None:
-        return
-    print('bo')
-    print(pending_order)
-    if pending_order['p0_at_sale'] is None:
-        print('moo')
-        if time >= pending_order['sale_time']:
-            print('1)')
-            global market_position_dark
-            market_position_dark += pending_order['quantity']
-            pending_order['p0_at_sale'] = p0
-        elif len(pending_trades) == 0:
-            print('2')
-            # TODO: Add support for using multiple trades of DARK
-            # You'll need to track how much you already sent and what you expect to reach
-            global customers
-            customer = customers[pending_order['source']]
-            trustworthiness = customer['full'] + customer['half'] - customer['random']
-            # TODO: consider adding equality
-            if trustworthiness >= 0:
-                global POSITION_LIMIT
-                global position_lit, position_dark, cash, price
-                quantity = pending_order['quantity']
-                # follow your guess
-                if pending_order['buy']:
-                    # p0 might go up
-                    # buy LIT, sell DARK
-                    buy_quantity = POSITION_LIMIT - position_lit - position_dark
-                    affordable = cash / price
-                    buy_quantity = int(min(quantity, buy_quantity, affordable))
-                    sell_quantity = int(position_lit + position_dark)
-                    difference = 0
-                    if buy_quantity >= 100 and readyToSend():
-                        difference = max(buy_quantity - 1000, 0)
-                        order.addBuy('TRDRS.LIT', buy_quantity - difference)
-                        sell_quantity = int(buy_quantity + position_lit + position_dark)
-                    # TODO: guess the price in a better way
-                    if sell_quantity >= 1000 and readyToSend():
-                        order.addSell('TRDRS.DARK', sell_quantity - difference, price=price)
-                else:
-                    # expecting p0 to go down
-                    # sell LIT, buy DARK
-                    sell_quantity = int(position_lit + position_dark)
-                    buy_quantity = POSITION_LIMIT - position_lit - position_dark
-                    affordable = cash / price
-                    # TODO: compute price in a better way
-                    buy_quantity = int(min(abs(quantity), affordable, buy_quantity))
-                    difference = 0
-                    if sell_quantity >= 100 and readyToSend():
-                        difference = max(sell_quantity - 1000, 0)
-                        order.addSell('TRDRS.LIT', sell_quantity - difference)
-                    if buy_quantity >= 1000 and readyToSend():
-                        order.addBuy('TRDRS.DARK', buy_quantity - difference, price=price)
-            else:
-                # we think it's random
-                pass
-        else:
-            print('jump')
-    elif pending_order['p0_at_eval'] is None and time >= pending_order['eval_time']:
-        print('3')
-        global pending_orders, C
-        pending_order['p0_at_eval'] = p0
-        change_in_p0 = p0 - pending_order['p0_at_news']
-        full = C * pending_order['quantity']
-        half = full / 2
-        margin = full / 4
-        name = pending_order['source']
-        if abs(change_in_p0 - full) <= margin:
-            customers[name]['full'] += 1
-        elif abs(change_in_p0 - half) <= margin:
-            customers[name]['half'] += 1
-        else:
-            customers[name]['random'] += 1
-        cancelTrades(order)
-        pending_orders = pending_orders[1:]
+def process_order(pending_order, order):
+    if not pending_order['sold'] and not is_closing_time():
+        handle_pre_sale(pending_order, order)
+        check_sold(pending_order)
+    elif not pending_order['done'] and not is_closing_time():
+        handle_post_sale(pending_order, order)
+        check_done(pending_order)
     else:
-        print('no')
+        handle_clean_up(pending_order, order)
 
-def cancelTrades(order):
-    global pending_trades
-    for pending in pending_trades:
-        if not pending[2] and readyToSend():
-            order.addCancel(pending[0], pending[1])
-            pending_trades.remove(pending)
-            pending_trades.add((pending[0], pending[1], True))
+def handle_pre_sale(pending_order, order):
+    reach_target_position(pending_order['target'], order)
+    if DARK_TRADING:
+        time_remaining = pending_order['sale_time'] - get_time()
+        expected_position_lit = -position_dark + pending_order['size']
+        market_price_guess = p0 - C*expected_position_lit
+        if len(pending_order['orders']) != 0:
+            pass
+            # TODO: Check and reguess if you were wrong.
+        elif pending_order['quantity'] != 0:
+            magnitude = abs(pending_order['quantity'])
+            num_orders = (magnitude // ORDER_LIMIT)
+            if magnitude != num_orders*ORDER_LIMIT:
+                num_orders += 1
+            quantity = int(magnitude / num_orders)
+            successes = 0
+            if not pending_order['buy']: # customer buys = we sell
+                for i in range(int(num_orders)):
+                    if ready_to_send():
+                        order.addBuy(DARK_TICKER, quantity, price=market_price_guess)
+                        successes += 1
+            else:
+                for i in range(int(num_orders)):
+                    if ready_to_send():
+                        order.addSell(DARK_TICKER, quantity, price=market_price_guess)
+                        successes += 1
+            # [quantity, price, [list of ids]]
+            pending_order['orders'].append([quantity*successes, market_price_guess, []])
+
+
+def check_sold(pending_order):
+    if get_time() > pending_order['sale_time']:
+        pending_order['p0_at_sale'] = p0
+        pending_order['sold'] = True
+
+def handle_post_sale(pending_order, order):
+    change_in_p0 = p0 - pending_order['p0_at_news']
+    full = C * pending_order['size']
+    half = full / 2
+    margin = abs(full / 4)
+    name = pending_order['source']
+    if abs(change_in_p0 - full) <= margin:
+        customers[name]['full'] += 1
+        pending_order['p0_at_eval'] = p0
+    elif abs(change_in_p0 - half) <= margin:
+        customers[name]['half'] += 1
+        pending_order['p0_at_eval'] = p0
+    elif abs(change_in_p0) <= margin:
+        if get_time() > pending_order['eval_time']:
+            customers[name]['random'] += 1
+            pending_order['p0_at_eval'] = p0
+    elif get_time() > pending_order['eval_time']:
+        pending_order['p0_at_eval'] = p0
+    else:
+        reach_target_position(pending_order['target'], order)
+    
+
+def check_done(pending_order):
+    pending_order['done'] = pending_order['p0_at_eval'] is not None
+
+def handle_clean_up(pending_order, order):
+    for i in reversed(range(len(pending_order['orders']))):
+        batch = pending_order['orders'][i]
+        for j in reversed(range(len(batch[2]))):
+            if ready_to_send():
+                order.addCancel(DARK_TICKER, batch[2][j])
+                batch[2].pop(j)
+        if len(batch[2]) == 0:
+            pending_order['orders'].pop(i)
+    if len(pending_order['orders']) == 0:
+        pending_orders.remove(pending_order)
+
+
+def reach_target_position(target, order, ticker=LIT_TICKER):
+    net_position = position_lit + position_dark
+    if net_position != target:
+        difference = target - net_position
+        magnitude = abs(difference)
+        num_orders = (magnitude // ORDER_LIMIT)
+        if magnitude != num_orders*ORDER_LIMIT:
+            num_orders += 1
+        buy = difference > 0
+        quantity = int(magnitude / num_orders)
+        if buy:
+            for i in range(int(num_orders)):
+                if ready_to_send():
+                    order.addBuy(ticker, quantity)
+        else:
+            for i in range(int(num_orders)):
+                if ready_to_send():
+                    order.addSell(ticker, quantity)
+
+def is_closing_time():
+    return CASE_LENGTH - get_time() < CLOSE_OUT_MARGIN
+
+def close_out(order):
+    if is_closing_time():
+        reach_target_position(0, order)
 
 def onAckRegister(msg, order):
-    print('reg')
-    global POSITION_LIMIT, CURRENCY, CASE_LENGTH
-    global time, p0
-    POSITION_LIMIT = msg['case_meta']['underlyings']['TRDRS']['limit']
+    global POSITION_LIMIT, CURRENCY, CASE_LENGTH, INITIAL_CASH
+    global time_offset, p0
+    if 'TRDRS' in msg['case_meta']['underlyings']:
+        POSITION_LIMIT = msg['case_meta']['underlyings']['TRDRS']['limit']
+    else:
+        POSITION_LIMIT = msg['case_meta']['underlyings']['TRDRS.LIT']['limit']
     CURRENCY = msg['case_meta']['default_currency']
     CASE_LENGTH = msg['case_meta']['case_length']
     p0 = msg['case_meta']['securities']['TRDRS.LIT']['starting_price']
-    time = msg['elapsed_time']
-    if time != 0:
-        global time_offset
-        time_offset = msg['elapsed_time']
-        first_time = datetime.now() - timedelta(seconds=time)
+    time_offset = msg['elapsed_time']
+    if time_offset == 0:
+        INITIAL_CASH = msg['trader_state']['cash'][CURRENCY]
     for name in msg['case_meta']['news_sources']:
         customers[name] = {'full': 0, 'half': 0, 'random': 0}
+        customer_identities[name] = {'full': 1/3, 'half': 1/3, 'random': 1/3}
     onTraderUpdate(msg, order)
 
 def onMarketUpdate(msg, order):
-    print('mark')
-    updateTime()
+    global first_time
+    if first_time is None:
+        first_time = datetime.now()
     state = msg['market_state']
     if state['ticker'] == 'TRDRS.LIT':
-        global market_position_lit, price, p0, C
+        global market_position_lit, price, p0
         price = state['last_price']
         delta = 0
         bids = [state['bids'][p] for p in state['bids'] if float(p) >= price]
@@ -181,46 +240,70 @@ def onMarketUpdate(msg, order):
             print('Bids', state['bids'])
         if len(state['asks']) != 0:
             print('Asks', state['asks'])
-    processOrders(order)
+    process_orders(order)
+    close_out(order)
 
 def onTraderUpdate(msg, order):
-    print('trader')
-    global CURRENCY
     global cash, position_lit, position_dark
     state = msg['trader_state']
     cash = state['cash'][CURRENCY]
     position_lit = state['positions']['TRDRS.LIT']
     position_dark = state['positions']['TRDRS.DARK']
-    print(state['open_orders'])
-    print('PNL:', state['pnl'][CURRENCY])
+    for i in reversed(range(len(cancelled_trades))):
+        if cancelled_trades[i][1] not in state['open_orders']:
+            cancelled_trades.pop(i)
+    for pending_order in pending_orders:
+        for i in reversed(range(len(pending_order['orders']))):
+            batch = pending_order['orders'][i]
+            for j in reversed(range(len(batch[2]))):
+                if batch[2][j] not in state['open_orders']:
+                    batch[2].pop(j)
+    pnl = (position_lit + position_dark) * price + cash - INITIAL_CASH
+    print('\rLIT:\t%i\tDARK:\t%i\tCASH:\t%1.2f\tPNL:\t%1.2f' % (position_lit, position_dark, cash, pnl), end='\r')
 
 def onTrade(msg, order):
-    print('trade')
-    global pending_trades
+    trades = set()
     for trade in msg['trades']:
-        pending_trades.discard((trade['ticker'], trade['trade_id'], False))
+        if trade['ticker'] == DARK_TICKER:
+            trades.add(trade['trade_id'])
+    for pending_order in pending_orders:
+        for i in reversed(range(len(pending_order['orders']))):
+            batch = pending_order['orders'][i]
+            for j in reversed(range(len(batch[2]))):
+                if batch[2][j] in trades:
+                    batch[2].pop(j)
 
 def onAckModifyOrders(msg, order):
-    print('mod')
-    global pending_trades
     if 'cancels' in msg:
         for trade_id in msg['cancels']:
             # remove successful cancels
-            trade = ('TRDRS.DARK', trade_id, True)
-            if ('TRDRS.DARK', trade_id, True) not in pending_trades:
-                trade = ('TRDRS.LIT', trade_id, True)
+            trade = (DARK_TICKER, trade_id, False)
+            if trade not in cancelled_trades:
+                trade = (LIT_TICKER, trade_id, False)
+                if trade not in cancelled_trades:
+                    trade = (DARK_TICKER, trade_id, True)
+                    if trade not in cancelled_trades:
+                        trade = (LIT_TICKER, trade_id, True)
+                        if trade not in cancelled_trades:
+                            continue
             pending_trades.remove(trade)
             if not msg['cancels'][trade_id]:
                 # add back failed cancels
                 pending_trades.add((trade[0], trade[1], False))
 
     for trade in msg['orders']:
-        order = (trade['ticker'], str(trade['order_id']), False)
-        # add orders we just sent in
-        pending_trades.add(order)
+        if trade['ticker'] == DARK_TICKER:
+            price = trade['price']
+            for pending_order in reversed(pending_orders):
+                for batch in reversed(pending_order['orders']):
+                    if price == batch[1]:
+                        batch[2].append(str(trade['order_id']))
+                        break
+                else:
+                    continue
+                break
 
 def onNews(msg, order):
-    print('news')
     try:
         news = msg['news']
         headline = news['headline']
@@ -228,27 +311,32 @@ def onNews(msg, order):
         sell = 'sell' in headline
         source = news['source']
         news_time = news['time']
-        quantity = news['body']
-        if (not buy and not sell) or str(quantity) not in headline:
-            print('Unable to parse headline')
+        size = news['body']
+        if (not buy and not sell) or str(size) not in headline:
+            print('Unable to parse headline: No buy or sell')
             return
-        quantity = int(quantity) * (1 if buy else -1)
-        global ORDER_DELAY
-        global pending_orders, p0
+        size = int(size) if buy else -int(size)
+        target_position = POSITION_LIMIT if buy else -POSITION_LIMIT
+        quantity = -2*POSITION_LIMIT if buy else 2*POSITION_LIMIT
         new_order = {'source': source,
                     'buy': buy,
+                    'size': size,
+                    'target': target_position,
                     'quantity': quantity,
                     'news_time': news_time,
                     'sale_time': news_time + ORDER_DELAY,
                     'eval_time': news_time + ORDER_WAIT,
                     'p0_at_news': p0,
                     'p0_at_sale': None,
-                    'p0_at_eval': None}
+                    'p0_at_eval': None,
+                    'orders': [],
+                    'sold': False,
+                    'done': False}
         pending_orders.append(new_order)
     except:
-        print('Unable to parse headline')
+        print('Unable to parse headline: Unknown error')
 
-DEBUG = False
+DEBUG = True
 algo_bot = None
 if len(sys.argv) >= 4:
     algo_bot = TradersBot(host=sys.argv[1], id=sys.argv[2], password=sys.argv[3])
