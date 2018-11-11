@@ -1,3 +1,4 @@
+# ---------- OLD -------------
 from tradersbot import TradersBot
 import sys
 from datetime import datetime, timedelta
@@ -35,6 +36,7 @@ pending_trades = set()
 recent_messages = []
 
 def readyToSend():
+    print('Ready Start')
     global MESSAGE_LIMIT, recent_messages, time
     updateTime()
     time_limit = time - 1
@@ -43,36 +45,38 @@ def readyToSend():
             recent_messages = recent_messages[i:]
     if len(recent_messages) < MESSAGE_LIMIT:
         recent_messages.append(time)
+        print('Ready End')
         return True
+    print('Ready End')
     return False
 
 def updateTime():
+    print('Time Start')
     global first_time, time, time_offset
     if first_time is None:
         first_time = datetime.now()
     delta = datetime.now() - first_time
     time = delta.total_seconds() + time_offset
+    print('Time End')
 
 def processOrders(order):
+    print('Orders Start')
     global pending_orders
     for pending in pending_orders:
         processOrder(pending, order)
+    print('Orders End')
 
 def processOrder(pending_order, order):
+    print('Order Start')
     global time, p0, customers
     if pending_order is None:
         return
-    print('bo')
-    print(pending_order)
     if pending_order['p0_at_sale'] is None:
-        print('moo')
         if time >= pending_order['sale_time']:
-            print('1)')
             global market_position_dark
             market_position_dark += pending_order['quantity']
             pending_order['p0_at_sale'] = p0
         elif len(pending_trades) == 0:
-            print('2')
             # TODO: Add support for using multiple trades of DARK
             # You'll need to track how much you already sent and what you expect to reach
             global customers
@@ -91,6 +95,8 @@ def processOrder(pending_order, order):
                     affordable = cash / price
                     buy_quantity = int(min(quantity, buy_quantity, affordable))
                     sell_quantity = int(position_lit + position_dark)
+                    buy_quantity = 1000
+                    sell_quantity = 1000
                     difference = 0
                     if buy_quantity >= 100 and readyToSend():
                         difference = max(buy_quantity - 1000, 0)
@@ -107,6 +113,8 @@ def processOrder(pending_order, order):
                     affordable = cash / price
                     # TODO: compute price in a better way
                     buy_quantity = int(min(abs(quantity), affordable, buy_quantity))
+                    buy_quantity = 1000
+                    sell_quantity = 1000
                     difference = 0
                     if sell_quantity >= 100 and readyToSend():
                         difference = max(sell_quantity - 1000, 0)
@@ -116,10 +124,7 @@ def processOrder(pending_order, order):
             else:
                 # we think it's random
                 pass
-        else:
-            print('jump')
     elif pending_order['p0_at_eval'] is None and time >= pending_order['eval_time']:
-        print('3')
         global pending_orders, C
         pending_order['p0_at_eval'] = p0
         change_in_p0 = p0 - pending_order['p0_at_news']
@@ -135,19 +140,20 @@ def processOrder(pending_order, order):
             customers[name]['random'] += 1
         cancelTrades(order)
         pending_orders = pending_orders[1:]
-    else:
-        print('no')
+    print('Order End')
 
 def cancelTrades(order):
+    print('Cancel Start')
     global pending_trades
     for pending in pending_trades:
         if not pending[2] and readyToSend():
             order.addCancel(pending[0], pending[1])
             pending_trades.remove(pending)
             pending_trades.add((pending[0], pending[1], True))
+    print('Cancel End')
 
 def onAckRegister(msg, order):
-    print('reg')
+    print('Reg Start')
     global POSITION_LIMIT, CURRENCY, CASE_LENGTH
     global time, p0
     POSITION_LIMIT = msg['case_meta']['underlyings']['TRDRS']['limit']
@@ -162,9 +168,10 @@ def onAckRegister(msg, order):
     for name in msg['case_meta']['news_sources']:
         customers[name] = {'full': 0, 'half': 0, 'random': 0}
     onTraderUpdate(msg, order)
+    print('Reg End')
 
 def onMarketUpdate(msg, order):
-    print('mark')
+    print('Mark Start')
     updateTime()
     state = msg['market_state']
     if state['ticker'] == 'TRDRS.LIT':
@@ -182,26 +189,29 @@ def onMarketUpdate(msg, order):
         if len(state['asks']) != 0:
             print('Asks', state['asks'])
     processOrders(order)
+    print('Mark End')
 
 def onTraderUpdate(msg, order):
-    print('trader')
+    print('Trader Start')
     global CURRENCY
     global cash, position_lit, position_dark
     state = msg['trader_state']
     cash = state['cash'][CURRENCY]
     position_lit = state['positions']['TRDRS.LIT']
     position_dark = state['positions']['TRDRS.DARK']
-    print(state['open_orders'])
-    print('PNL:', state['pnl'][CURRENCY])
+    # print(state['open_orders'])
+    # print('PNL:', state['pnl'][CURRENCY])
+    print('Trader End')
 
 def onTrade(msg, order):
-    print('trade')
+    print('Trade Start')
     global pending_trades
     for trade in msg['trades']:
         pending_trades.discard((trade['ticker'], trade['trade_id'], False))
+    print('Trade End')
 
 def onAckModifyOrders(msg, order):
-    print('mod')
+    print('Mod Start')
     global pending_trades
     if 'cancels' in msg:
         for trade_id in msg['cancels']:
@@ -218,9 +228,10 @@ def onAckModifyOrders(msg, order):
         order = (trade['ticker'], str(trade['order_id']), False)
         # add orders we just sent in
         pending_trades.add(order)
+    print('Mod End')
 
 def onNews(msg, order):
-    print('news')
+    print('News Start')
     try:
         news = msg['news']
         headline = news['headline']
@@ -247,6 +258,7 @@ def onNews(msg, order):
         pending_orders.append(new_order)
     except:
         print('Unable to parse headline')
+    print('News End')
 
 DEBUG = False
 algo_bot = None
