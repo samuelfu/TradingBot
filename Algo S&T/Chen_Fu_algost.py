@@ -185,7 +185,10 @@ def adjust_dark_advantage(pending_order):
     down = [pair[1] for pair in dark_trading_history if abs(pair[0] - dark_advantage) <= margin]
     # If we're not selling everything, move 
     if len(up) == 0:
-        if random.random() < 0.25:
+        if sum(down) == 0 and sum(stay) == 0:
+            dark_advantage *= 0.81
+            return
+        if random.random() < 0.05:
             dark_advantage *= 1.1
             return
         else:
@@ -324,7 +327,7 @@ def onTraderUpdate(msg, order):
                     batch[2].pop(j)
     pnl = (position_lit + position_dark) * price + cash - INITIAL_CASH
     time = int(get_time())
-    print('\rLIT:{:<7} DARK:{:<7} CASH:{:<11.2f} PNL:{:<10.2f} T:{:<3}'.format(position_lit, position_dark, cash, pnl, time), end='\r')
+    print('\rLIT:{:<7} DARK:{:<7} CASH:{:<11.2f} PNL:{:<10.2f} T:{:<3} DA:{:<1.4f}'.format(position_lit, position_dark, cash, pnl, time, dark_advantage), end='\r')
     # print('\rLIT:\t%i\tDARK:\t%i\tCASH:\t%1.2f\tPNL:\t%1.2f' % (position_lit, position_dark, cash, pnl), end='\r')
 
 def onTrade(msg, order):

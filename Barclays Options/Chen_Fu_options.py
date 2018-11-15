@@ -72,15 +72,23 @@ def trader_update_method(msg, order):
             else:
                 predicted_price = bsm_price('p', predicted_IV, current_underlying_price, int(security[1:-1]), 0, time_until_expiration)
             if predicted_price > current_option_price:
-                order.addBuy(security, quantity=10, price=SECURITIES[security])
+                if totalPositions(msg) < 4950:
+                    order.addBuy(security, quantity=10, price=SECURITIES[security])
+                else:
+                    order.addBuy(security,quantity=int(positions[security]*-1/2), price=SECURITIES[security])
                 orderLimit += 1
             else:
-                order.addSell(security, quantity=10, price=SECURITIES[security])
+                if totalPositions(msg) < 4950:
+                    order.addSell(security, quantity=10, price=SECURITIES[security])
+                else:
+                    order.addSell(security,quantity=int(positions[security]*-1/2), price=SECURITIES[security])
                 orderLimit += 1
         # 80 goes over the limit some how
         if orderLimit > 37:
             break
-    #print(str(totalValueInPortfolio(msg)+msg['trader_state']['cash']['USD']-1000000)+'\t'+str(totalPositions(msg)))
+        if totalPositions(msg) < 4950:
+            continue
+    print(str(totalValueInPortfolio(msg)+msg['trader_state']['cash']['USD']-1000000)+'\t'+str(totalPositions(msg)))
 
 # Assumes that msg contains every single option's update
 def totalValueInPortfolio(msg):
