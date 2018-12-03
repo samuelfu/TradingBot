@@ -1,4 +1,4 @@
-# MIT_Trading
+# TradingBot
 
 ```
 $ mangocore --help
@@ -48,7 +48,7 @@ Five example tickers are listed below; other tickers follow the same naming conv
 The ticker for futures on the index is “TMXFUT”
 
 ### File information
-`example_bot.py`
+`Chen_Fu_options.py`
 
 Calculates the implied volatility of T100C whenever market updates
 
